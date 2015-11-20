@@ -1,0 +1,286 @@
+#!/bin/bash
+#
+#    MP3InfoV2 - Get ID3v2 tag from mp3 files
+#    Copyright (C) 2015  Fabian Wiget <fabacino@gmail.com>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+# Display usage if no arguments were given
+if [ $# -eq 0 ]; then
+    cat <<EOF
+MP3InfoV2  Copyright (C) 2015  Fabian Wiget
+
+This program comes with ABSOLUTELY NO WARRANTY; for details type \`show w'.
+This is free software, and you are welcome to redistribute it
+under certain conditions; type \`show c' for details.
+
+For usage and available options, type 'mp3infov2 -h'.
+EOF
+    exit 0
+fi
+
+# Help/usage
+help=`cat <<EOF
+Usage:
+  mp3infov2 -p <FORMAT_STRING> FILE...
+  mp3infov2 [OPTION]... FILE...
+
+Get ID3v2 tag from FILEs if the print switch is specified,
+otherwise pass the arguments to mp3info.
+
+Options:
+  -h, --help          Show this help page
+      --v1            Force usage of mp3info
+  -p, --print=FORMAT  Print FORMAT string with substitutions
+
+      Available substitutions:
+
+      %f      Filename without the path (string)
+      %F      Filename with the path (string)
+      %k      File size in KB (integer)
+
+      %a      Artist (string)
+      %c      Comment (string)
+      %g      Musical genre (string)
+      %G      Musical genre (integer)
+      %l      Album name (string)
+      %n      Track (integer)
+      %t      Track Title (string)
+      %y      Year (string)
+
+      %r      Bitrate in KB/s (see also '-r')
+      %m      Playing time: minutes only (integer)
+      %s      Playing time: seconds only (integer)
+      %S      Total playing time in seconds (integer)
+
+      %%      A single percent sign
+
+      Escape Sequences:
+
+      \n      Newline
+      \t      Horizontal tab
+      \v      Vertical tab
+      \b      Backspace
+      \r      Carriage Return
+      \f      Form Feed
+      \a      Audible Alert (terminal bell)
+      \xhh    Any arbitrary character specified by the hexidecimal number hh
+      \ooo    Any arbitrary character specified by the octal number ooo
+      \\\\      A single backslash character
+
+Example:
+  mp3infov2 -p 'Title: %t\tArtist: %a\nAlbum: %l\tYear: %y\n' /path/to/file.mp3
+
+See 'man mp3info' for all available options for mp3info.
+
+Check the README file for more information (local copy or
+online at <https://github.com/fabacino/mp3infov2>).
+
+EOF`
+
+# v1 arguments are passed to mp3info, v2 arguments are processed by this
+# script (these can only be files at the moment). We do not know yet if
+# we call mp3info or process the call by ourselves, therefore we have to
+# prepare for both scenarios.
+v1_args=()
+v2_args=()
+tag_version=2
+
+# If a format string is specified with the print switch, it will be saved
+# into this variable.
+format_string=''
+
+# Process arguments
+next_arg=''
+while [[ $1 ]]
+do
+    if [ "$next_arg" == 'format-string' ]; then
+        format_string="$1"
+        next_arg=''
+        v1_args+=("$1")
+        shift
+    elif [ "$1" == '-h' ] || [ "$1" == '--help' ]; then
+        echo "$help"
+        exit 0
+    elif [ "$1" == '--v1' ]; then
+        tag_version=1
+        shift
+    elif [ "$1" == '-p' ] || [ "$1" == '--print' ]; then
+        next_arg='format-string'
+        v1_args+=("$1")
+        shift
+    elif [ "${1:0:1}" == '-' ]; then
+        v1_args+=("$1")
+        shift
+    else
+        v1_args+=("$1")
+        v2_args+=("$1")
+        shift
+    fi
+done
+
+# If no format string is given, we pass the call to mp3info, since we do not
+# know what to do with it. If the v1 option is specified, the call is always
+# passed to mp3info, even if the print option is present.
+if [ $tag_version -eq 1 ] || [ ${#format_string} -eq 0 ]; then
+    mp3info "${v1_args[@]}"
+    exit $?
+fi
+
+# Define some handy functions
+
+# Function to save a tag field into variable fld_val
+fill_fld_val()
+{
+    fld_val=`echo "$tag_info" | grep -e "^$1"`
+    fld_val=`echo "$fld_val" | cut -d: -f2`
+    trim_fld_val
+}
+
+# Function to trim the value in variable fld_val
+trim_fld_val()
+{
+    # Non-greedy quantifier does not work with sed
+    fld_val=`echo "$fld_val" | sed 's/^\s*\(.*\)$/\1/' | rev | \
+                               sed 's/^\s*\(.*\)$/\1/' | rev`
+}
+
+# Function to get the filesize and save it info variable fld_val
+fill_filesize()
+{
+    fld_val=`du -k "$1" | cut -f1`
+}
+
+# Function to get the bitrate and save it info variable fld_val
+fill_bitrate()
+{
+    fld_val=`file -b "$1" | sed 's/.* \([0-9]\+\) kbps.*/\1/'`
+}
+
+# Function to calculate the playing time and save it info variable fld_val
+fill_playing_time()
+{
+    fill_filesize "$1"; filesize="$fld_val"
+    fill_bitrate "$1"; bitrate="$fld_val"
+    if [ "$bitrate" -gt 8 ]; then
+        fld_val=`awk "BEGIN {
+                     printf "'"%.0f"'", $filesize / ($bitrate / 8) + 0.5
+                 }"`
+    else
+        fld_val=0
+    fi
+}
+
+# Split format string by the substitution character %. Literal percent signs
+# have to be replaced first.
+format_string=`sed 's/%%/\\x25/g' <<< "$format_string"`
+parts=()
+IFS='%' read -r -a parts <<< "$format_string"
+
+# Iterate over the specified files replacing the substitutions
+output=''
+for file in "${v2_args[@]}"
+do
+    # Use id3v2 to get tag information
+    tag_info=`id3v2 -l "$file"`
+    echo "$tag_info" | grep -q '^id3v2 tag info for '
+    if [ $? ]; then
+        # File contains a ID3v2 tag => replace substitutions in format string
+        for index in "${!parts[@]}"
+        do
+            # First array entry contains everything to the left of the
+            # first substitutions character, thus there is nothing to replace
+            value="${parts[index]}"
+            if [ $index -eq 0 ]; then
+                output="${output}${value}"
+                continue;
+            fi
+
+            # Replace available substitutions
+            fld_val=''
+            case "${value:0:1}" in
+                a) # Artist (string)
+                    fill_fld_val 'TPE1'
+                    ;;
+                c) # Comment (string)
+                    fill_fld_val 'COMM'
+                    ;;
+                f) # Filename without the path (string)
+                    fld_val=`basename "$file"`
+                    ;;
+                F) # Filename with the path (string)
+                    fld_val="$file"
+                    ;;
+                g) # Musical genre (string)
+                    fill_fld_val 'TCON'
+                    fld_val=`sed 's/^\(.*\)([0-9]\+)$/\1/' <<< "$fld_val"`
+                    trim_fld_val
+                    ;;
+                G) # Musical genre (integer)
+                    fill_fld_val 'TCON'
+                    fld_val=`sed 's/^.*(\([0-9]\+\))$/\1/' <<< "$fld_val"`
+                    ;;
+                k) # File size in KB (integer)
+                    fill_filesize "$file"
+                    ;;
+                l) # Album name (string)
+                    fill_fld_val 'TALB'
+                    ;;
+                m) # Playing time: minutes only (integer)
+                    fill_playing_time "$file"
+                    fld_val=`awk "BEGIN { printf "'"%d"'", $fld_val / 60 }"`
+                    ;;
+                n) # Track (integer)
+                    fill_fld_val 'TRCK'
+                    fld_val=`sed 's/\/.*//' <<< "$fld_val"`
+                    ;;
+                r) # Bitrate in KB/s
+                    fill_bitrate "$file"
+                    ;;
+                s) # Playing time: seconds only (integer)
+                    fill_playing_time "$file"
+                    minutes=`awk "BEGIN { printf "'"%d"'", $fld_val / 60 }"`
+                    fld_val=`awk "BEGIN {
+                                 printf "'"%d"'", $fld_val - $minutes * 60
+                             }"`
+                    ;;
+                S) # Total playing time in seconds (integer)
+                    fill_playing_time "$file"
+                    ;;
+                t) # Track Title (string)
+                    fill_fld_val 'TIT2'
+                    ;;
+                y) # Year (string)
+                    fill_fld_val 'TYER'
+                    ;;
+                *) # Default => use literal character
+                    fld_val="%${value:0:1}"
+                    ;;
+            esac
+
+            # Add value to the output without the substitution character
+            output="${output}${fld_val}${value:1}"
+        done
+    else
+        # File does not contain a ID3v2 tag => use mp3info the get ID3v1 tag
+        tag_info=`mp3info -p "$format_string" "$file"`
+        output="${output}${tag_info}"
+    fi
+
+done
+
+# Print output
+echo -e "$output"
+exit 0
