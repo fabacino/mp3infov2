@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#    MP3InfoV2 - Get ID3v2 tag from mp3 files
+#    MP3InfoV2 - Get ID3v2 tag information from mp3 files
 #    Copyright (C) 2015  Fabian Wiget <fabacino@gmail.com>
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -37,7 +37,7 @@ Usage:
   mp3infov2 -p <FORMAT_STRING> FILE...
   mp3infov2 [OPTION]... FILE...
 
-Get ID3v2 tag from FILEs if the print switch is specified,
+Get ID3v2 tag from FILEs if the --print option is specified,
 otherwise pass the arguments to mp3info.
 
 Options:
@@ -132,8 +132,8 @@ do
 done
 
 # If no format string is given, we pass the call to mp3info, since we do not
-# know what to do with it. If the v1 option is specified, the call is always
-# passed to mp3info, even if the print option is present.
+# know what to do with it. If the --v1 option is specified, the call is always
+# passed to mp3info, even if the --print option is present.
 if [ $tag_version -eq 1 ] || [ ${#format_string} -eq 0 ]; then
     mp3info "${v1_args[@]}"
     exit $?
