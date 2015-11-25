@@ -141,6 +141,16 @@ fi
 
 # Define some handy functions
 
+# Function to get technical information about the mp3 file and save it into
+# variable tech_info
+read_tech_info()
+{
+    # Only retrieve the information once per file
+    if [ ${#tech_info} -eq 0 ]; then
+        tech_info=`mp3info -x "$1"`
+    fi
+}
+
 # Function to save a tag field into variable fld_val
 fill_fld_val()
 {
@@ -166,7 +176,13 @@ fill_filesize()
 # Function to get the bitrate and save it info variable fld_val
 fill_bitrate()
 {
-    fld_val=`file -b "$1" | sed 's/.* \([0-9]\+\) kbps.*/\1/'`
+    read_tech_info "$1"
+    bitrate=`echo "$tech_info" | grep '^Audio:\s*[0-9]\+'`
+    if [ ${#bitrate} -gt 0 ]; then
+        fld_val=`sed 's/^Audio:\s*\([0-9]\+\) .*$/\1/' <<< "$bitrate"`
+    else
+        fld_val=0
+    fi
 }
 
 # Function to calculate the playing time and save it info variable fld_val
@@ -198,6 +214,7 @@ do
     echo "$tag_info" | grep -q '^id3v2 tag info for '
     if [ $? ]; then
         # File contains a ID3v2 tag => replace substitutions in format string
+        tech_info=''
         for index in "${!parts[@]}"
         do
             # First array entry contains everything to the left of the
