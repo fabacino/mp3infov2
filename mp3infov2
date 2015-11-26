@@ -53,6 +53,7 @@ Options:
 
       %a      Artist (string)
       %c      Comment (string)
+      %d      Disc number (string)
       %g      Musical genre (string)
       %G      Musical genre (integer)
       %l      Album name (string)
@@ -233,6 +234,9 @@ do
                     ;;
                 c) # Comment (string)
                     fill_fld_val 'COMM'
+                    ;;
+                d) # Disc number (string)
+                    fill_fld_val 'TPOS'
                     ;;
                 f) # Filename without the path (string)
                     fld_val=`basename "$file"`
